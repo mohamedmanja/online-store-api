@@ -2,6 +2,7 @@ package com.harmony.store.payments;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.harmony.store.orders.CreateOrderFromSessionDto;
 import com.harmony.store.orders.OrdersService;
@@ -12,6 +13,7 @@ import com.stripe.exception.SignatureVerificationException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.Event;
 import com.stripe.model.checkout.Session;
+import com.stripe.net.RequestOptions;
 import com.stripe.net.Webhook;
 import com.stripe.param.checkout.SessionCreateParams;
 import lombok.extern.slf4j.Slf4j;
@@ -21,12 +23,21 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 @Slf4j
 @Service
 public class PaymentsService {
+
+    private static final RequestOptions STRIPE_REQUEST_OPTIONS;
+
+    static {
+        RequestOptions.RequestOptionsBuilder builder = RequestOptions.builder();
+        RequestOptions.RequestOptionsBuilder.unsafeSetStripeVersionOverride(builder, "2026-03-25.dahlia");
+        STRIPE_REQUEST_OPTIONS = builder.build();
+    }
 
     private final OrdersService ordersService;
     private final ObjectMapper objectMapper;
@@ -97,7 +108,7 @@ public class PaymentsService {
         if (addressMeta != null) params.putMetadata("shippingAddress", addressMeta);
 
         try {
-            Session session = Session.create(params.build());
+            Session session = Session.create(params.build(), STRIPE_REQUEST_OPTIONS);
             if (session.getUrl() == null) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Failed to create Stripe session");
             }
@@ -111,6 +122,9 @@ public class PaymentsService {
     // ── Webhook Handler ───────────────────────────────────────────────────────
 
     public void handleWebhook(byte[] rawBody, String signature) {
+        log.info("Webhook received — body size: {} bytes, signature present: {}",
+                rawBody.length, signature != null && !signature.isBlank());
+
         Event event;
         try {
             event = Webhook.constructEvent(new String(rawBody), signature, webhookSecret);
@@ -119,11 +133,45 @@ public class PaymentsService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid webhook signature");
         }
 
+        log.info("Webhook event — id: {}, type: {}, apiVersion: {}",
+                event.getId(), event.getType(), event.getApiVersion());
+
         switch (event.getType()) {
             case "checkout.session.completed" -> {
-                Session session = (Session) event.getDataObjectDeserializer()
-                        .getObject().orElseThrow();
-                onCheckoutComplete(session);
+                log.info("Inside checkout.session.completed switch case — event apiVersion: {}", event.getApiVersion());
+
+                var deserializer = event.getDataObjectDeserializer();
+                String sessionId;
+                Long amountTotal;
+                Map<String, String> metadata;
+
+                if (deserializer.getObject().isPresent()) {
+                    Session session = (Session) deserializer.getObject().get();
+                    sessionId  = session.getId();
+                    amountTotal = session.getAmountTotal();
+                    metadata   = session.getMetadata();
+                    log.info("checkout.session.completed (SDK) — sessionId: {}, paymentStatus: {}, amountTotal: {}, currency: {}",
+                            session.getId(), session.getPaymentStatus(), session.getAmountTotal(), session.getCurrency());
+                } else {
+                    log.warn("SDK could not deserialize session object (apiVersion: {}), falling back to raw JSON parsing",
+                            event.getApiVersion());
+                    try {
+                        JsonNode node = objectMapper.readTree(deserializer.getRawJson());
+                        sessionId   = node.path("id").asText(null);
+                        amountTotal = node.path("amount_total").isNull() ? null : node.path("amount_total").asLong();
+                        Map<String, String> meta = new HashMap<>();
+                        node.path("metadata").fields().forEachRemaining(e -> meta.put(e.getKey(), e.getValue().asText()));
+                        metadata = meta;
+                        log.info("checkout.session.completed (raw JSON) — sessionId: {}, paymentStatus: {}, amountTotal: {}, currency: {}",
+                                sessionId, node.path("payment_status").asText(), amountTotal, node.path("currency").asText());
+                    } catch (JsonProcessingException e) {
+                        log.error("Failed to parse raw Stripe event JSON: {}", e.getMessage(), e);
+                        return;
+                    }
+                }
+
+                log.info("Session metadata: {}", metadata);
+                onCheckoutComplete(sessionId, amountTotal, metadata);
             }
             case "checkout.session.expired" ->
                     log.warn("Stripe session expired: {}", event.getId());
@@ -134,16 +182,22 @@ public class PaymentsService {
 
     // ── Private: fulfil the order ─────────────────────────────────────────────
 
-    private void onCheckoutComplete(Session session) {
-        Map<String, String> meta = session.getMetadata();
-        if (meta == null) return;
+    private void onCheckoutComplete(String sessionId, Long amountTotal, Map<String, String> meta) {
+        if (meta == null) {
+            log.error("onCheckoutComplete — metadata is null for session {}", sessionId);
+            return;
+        }
 
         String userId   = meta.get("userId");
         String rawItems = meta.get("items");
         String rawAddr  = meta.get("shippingAddress");
 
+        log.info("onCheckoutComplete — sessionId: {}, userId: {}, rawItems: {}, rawAddr: {}",
+                sessionId, userId, rawItems, rawAddr);
+
         if (userId == null || rawItems == null) {
-            log.error("Webhook missing metadata for session {}", session.getId());
+            log.error("Webhook missing metadata for session {} — userId={}, items={}",
+                    sessionId, userId, rawItems);
             return;
         }
 
@@ -153,22 +207,31 @@ public class PaymentsService {
             Map<String, String> shippingAddress = rawAddr != null
                     ? objectMapper.readValue(rawAddr, new TypeReference<>() {}) : null;
 
+            log.info("Parsed items: {}, shippingAddress: {}", items, shippingAddress);
+
             CreateOrderFromSessionDto dto = new CreateOrderFromSessionDto();
             dto.setUserId(userId);
-            dto.setStripeSessionId(session.getId());
+            dto.setStripeSessionId(sessionId);
             dto.setItems(items);
-            dto.setTotal((session.getAmountTotal() != null ? session.getAmountTotal() : 0L) / 100.0);
+            dto.setTotal((amountTotal != null ? amountTotal : 0L) / 100.0);
             dto.setShippingAddress(shippingAddress);
+
+            log.info("Calling createFromStripeSession — sessionId: {}, userId: {}, total: {}, itemCount: {}",
+                    dto.getStripeSessionId(), dto.getUserId(), dto.getTotal(), dto.getItems().size());
 
             try {
                 ordersService.createFromStripeSession(dto);
+                log.info("Order created successfully for session {}", sessionId);
             } catch (OrdersService.DuplicateSessionException e) {
-                // Already processed — idempotent
+                log.info("Duplicate webhook — order already exists for session {}", sessionId);
             }
 
-            log.info("Order created for session {}", session.getId());
         } catch (JsonProcessingException e) {
-            log.error("Failed to parse webhook metadata: {}", e.getMessage());
+            log.error("Failed to parse webhook metadata for session {}: {}", sessionId, e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Unexpected error processing checkout.session.completed for session {}: {}",
+                    sessionId, e.getMessage(), e);
+            throw e;
         }
     }
 }

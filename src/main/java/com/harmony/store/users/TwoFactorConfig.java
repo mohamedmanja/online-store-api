@@ -20,7 +20,7 @@ public class TwoFactorConfig {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @OneToOne(fetch = FetchType.LAZY)
+    @OneToOne
     @JoinColumn(name = "user_id", unique = true, nullable = false)
     @JsonIgnore
     private User user;

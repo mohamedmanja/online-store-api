@@ -33,15 +33,25 @@ public class OrdersService {
 
     @Transactional
     public Order createFromStripeSession(CreateOrderFromSessionDto dto) {
+        log.info("createFromStripeSession — sessionId: {}, userId: {}, total: {}, itemCount: {}",
+                dto.getStripeSessionId(), dto.getUserId(), dto.getTotal(),
+                dto.getItems() != null ? dto.getItems().size() : 0);
+
         // Idempotency — Stripe may deliver same event more than once
         orderRepo.findByStripeSessionId(dto.getStripeSessionId()).ifPresent(existing -> {
             log.warn("Duplicate webhook for session {}", dto.getStripeSessionId());
             throw new DuplicateSessionException(existing);
         });
 
-        User user = dto.getUserId() != null
-                ? userRepo.findById(UUID.fromString(dto.getUserId())).orElse(null)
-                : null;
+        User user = null;
+        if (dto.getUserId() != null) {
+            user = userRepo.findById(UUID.fromString(dto.getUserId())).orElse(null);
+            if (user == null) {
+                log.warn("User not found for id {} — order will be saved without user", dto.getUserId());
+            } else {
+                log.info("Resolved user: id={}, email={}", user.getId(), user.getEmail());
+            }
+        }
 
         Order order = Order.builder()
                 .user(user)
@@ -51,13 +61,24 @@ public class OrdersService {
                 .shippingAddress(dto.getShippingAddress())
                 .build();
 
+        log.info("Saving order — sessionId: {}, status: {}, total: {}", order.getStripeSessionId(), order.getStatus(), order.getTotal());
         Order saved = orderRepo.save(order);
+        log.info("Order saved — id: {}", saved.getId());
 
         List<OrderItem> items = new ArrayList<>();
         for (CreateOrderFromSessionDto.CheckoutItem item : dto.getItems()) {
+            log.info("Processing item — productId: {}, quantity: {}, price: {}",
+                    item.getProductId(), item.getQuantity(), item.getPrice());
+
             Product product = item.getProductId() != null
                     ? productRepo.findById(UUID.fromString(item.getProductId())).orElse(null)
                     : null;
+
+            if (product == null) {
+                log.warn("Product not found for id {} — order item will be saved without product reference", item.getProductId());
+            } else {
+                log.info("Resolved product: id={}, name={}, stock={}", product.getId(), product.getName(), product.getStock());
+            }
 
             OrderItem orderItem = OrderItem.builder()
                     .order(saved)
@@ -65,9 +86,12 @@ public class OrdersService {
                     .quantity(item.getQuantity())
                     .unitPrice(BigDecimal.valueOf(item.getPrice()))
                     .build();
-            items.add(itemRepo.save(orderItem));
+            OrderItem savedItem = itemRepo.save(orderItem);
+            log.info("OrderItem saved — id: {}", savedItem.getId());
+            items.add(savedItem);
 
             if (product != null) {
+                log.info("Decrementing stock — productId: {}, quantity: {}", product.getId(), item.getQuantity());
                 productRepo.decrementStock(product.getId(), item.getQuantity());
             }
         }
