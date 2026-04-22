@@ -17,7 +17,7 @@ public class UserPreferences {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @OneToOne(fetch = FetchType.LAZY)
+    @OneToOne
     @JoinColumn(name = "user_id", unique = true, nullable = false)
     private User user;
 
