@@ -138,40 +138,19 @@ public class PaymentsService {
 
         switch (event.getType()) {
             case "checkout.session.completed" -> {
-                log.info("Inside checkout.session.completed switch case — event apiVersion: {}", event.getApiVersion());
+                try{
+                    var deserializer = event.getDataObjectDeserializer();
 
-                var deserializer = event.getDataObjectDeserializer();
-                String sessionId;
-                Long amountTotal;
-                Map<String, String> metadata;
-
-                if (deserializer.getObject().isPresent()) {
                     Session session = (Session) deserializer.getObject().get();
-                    sessionId  = session.getId();
-                    amountTotal = session.getAmountTotal();
-                    metadata   = session.getMetadata();
-                    log.info("checkout.session.completed (SDK) — sessionId: {}, paymentStatus: {}, amountTotal: {}, currency: {}",
+    
+                    log.info("checkout.session.completed — sessionId: {}, paymentStatus: {}, amountTotal: {}, currency: {}",
                             session.getId(), session.getPaymentStatus(), session.getAmountTotal(), session.getCurrency());
-                } else {
-                    log.warn("SDK could not deserialize session object (apiVersion: {}), falling back to raw JSON parsing",
-                            event.getApiVersion());
-                    try {
-                        JsonNode node = objectMapper.readTree(deserializer.getRawJson());
-                        sessionId   = node.path("id").asText(null);
-                        amountTotal = node.path("amount_total").isNull() ? null : node.path("amount_total").asLong();
-                        Map<String, String> meta = new HashMap<>();
-                        node.path("metadata").fields().forEachRemaining(e -> meta.put(e.getKey(), e.getValue().asText()));
-                        metadata = meta;
-                        log.info("checkout.session.completed (raw JSON) — sessionId: {}, paymentStatus: {}, amountTotal: {}, currency: {}",
-                                sessionId, node.path("payment_status").asText(), amountTotal, node.path("currency").asText());
-                    } catch (JsonProcessingException e) {
-                        log.error("Failed to parse raw Stripe event JSON: {}", e.getMessage(), e);
-                        return;
-                    }
-                }
 
-                log.info("Session metadata: {}", metadata);
-                onCheckoutComplete(sessionId, amountTotal, metadata);
+                    onCheckoutComplete(session.getId(), session.getAmountTotal(), session.getMetadata());
+                } catch (Exception e) {
+                    log.error("Failed to extract session data: {}", e.getMessage(), e);
+                }
+                
             }
             case "checkout.session.expired" ->
                     log.warn("Stripe session expired: {}", event.getId());
@@ -192,8 +171,6 @@ public class PaymentsService {
         String rawItems = meta.get("items");
         String rawAddr  = meta.get("shippingAddress");
 
-        log.info("onCheckoutComplete — sessionId: {}, userId: {}, rawItems: {}, rawAddr: {}",
-                sessionId, userId, rawItems, rawAddr);
 
         if (userId == null || rawItems == null) {
             log.error("Webhook missing metadata for session {} — userId={}, items={}",
@@ -207,17 +184,12 @@ public class PaymentsService {
             Map<String, String> shippingAddress = rawAddr != null
                     ? objectMapper.readValue(rawAddr, new TypeReference<>() {}) : null;
 
-            log.info("Parsed items: {}, shippingAddress: {}", items, shippingAddress);
-
             CreateOrderFromSessionDto dto = new CreateOrderFromSessionDto();
             dto.setUserId(userId);
             dto.setStripeSessionId(sessionId);
             dto.setItems(items);
             dto.setTotal((amountTotal != null ? amountTotal : 0L) / 100.0);
             dto.setShippingAddress(shippingAddress);
-
-            log.info("Calling createFromStripeSession — sessionId: {}, userId: {}, total: {}, itemCount: {}",
-                    dto.getStripeSessionId(), dto.getUserId(), dto.getTotal(), dto.getItems().size());
 
             try {
                 ordersService.createFromStripeSession(dto);

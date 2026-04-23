@@ -19,7 +19,7 @@
   <properties>
     <java.version>17</java.version>
     <jjwt.version>0.12.5</jjwt.version>
-    <stripe.version>24.10.0</stripe.version>
+    <stripe.version>32.0.0</stripe.version>
     <minio.version>8.6.0</minio.version>
     <totp.version>1.7.1</totp.version>
   </properties>
