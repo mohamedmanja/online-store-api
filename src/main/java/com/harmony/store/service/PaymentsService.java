@@ -5,7 +5,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.harmony.store.dto.CreateOrderFromSessionDto;
-import com.harmony.store.service.OrdersService;
 import com.harmony.store.dto.CheckoutItemDto;
 import com.harmony.store.dto.CreateCheckoutDto;
 import com.stripe.Stripe;
@@ -26,7 +25,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import com.harmony.store.model.Order;
 
 @Slf4j
 @Service
@@ -66,6 +64,7 @@ public class PaymentsService {
             SessionCreateParams.LineItem.PriceData.ProductData productData =
                     SessionCreateParams.LineItem.PriceData.ProductData.builder()
                             .setName(item.getName())
+                            .addImage(item.getImageUrl())
                             .build();
 
             // Build price data
