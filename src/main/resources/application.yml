@@ -46,6 +46,7 @@ spring:
             enable: true
           ssl:
             trust: "*"
+            checkserveridentity: false
 
   servlet:
     multipart:

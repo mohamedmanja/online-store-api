@@ -1,10 +1,10 @@
 package com.harmony.store.config;
 
-import com.harmony.store.auth.AuthService;
-import com.harmony.store.auth.dto.LoginResponse;
-import com.harmony.store.users.User;
-import com.harmony.store.users.UserRole;
-import com.harmony.store.users.UsersService;
+import com.harmony.store.service.AuthService;
+import com.harmony.store.dto.LoginResponse;
+import com.harmony.store.model.User;
+import com.harmony.store.model.UserRole;
+import com.harmony.store.service.UsersService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
