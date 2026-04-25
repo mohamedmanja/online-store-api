@@ -25,6 +25,7 @@ public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
+    private final CookieOAuth2AuthorizationRequestRepository cookieAuthRequestRepository;
 
     @Value("${app.frontend-url}")
     private String frontendUrl;
@@ -53,7 +54,11 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .oauth2Login(oauth2 -> oauth2
-                .authorizationEndpoint(ep -> ep.baseUri("/auth/oauth2"))
+                .authorizationEndpoint(ep -> ep
+                    .baseUri("/auth/oauth2")
+                    // Use cookie-based state store so OAuth works across multiple
+                    // Kubernetes pods — no sticky sessions or shared session store needed.
+                    .authorizationRequestRepository(cookieAuthRequestRepository))
                 .redirectionEndpoint(ep -> ep.baseUri("/auth/{registrationId}/callback"))
                 .successHandler(oAuth2SuccessHandler)
             )

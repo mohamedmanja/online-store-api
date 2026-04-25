@@ -64,6 +64,9 @@ app:
     expiry-days: 7
     pending-expiry-minutes: 10
   frontend-url: ${FRONTEND_URL:http://localhost:3000}
+  oauth:
+    # Secret used to HMAC-sign the OAuth2 state cookie — must be the same across all pods.
+    state-secret: ${OAUTH_STATE_SECRET:changeme-use-a-strong-random-secret-in-production}
   origin:
     name: ${ORIGIN_NAME:Harmony Store}
     address: ${ORIGIN_ADDRESS:123 Main St}
