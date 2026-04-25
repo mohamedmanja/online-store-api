@@ -217,19 +217,33 @@ k8s/
 
 ### How it works
 
-Both deployments run simultaneously. The Service's `slot` selector label is the only traffic switch — changing it from `blue` to `green` (or back) is instant and zero-downtime.
+**Blue is always the live slot.** The service permanently points to `slot: blue` — you never need to edit `service.yaml`. Green is a temporary staging slot used only during an update, and is scaled down to zero in steady state.
 
 ```
-  Ingress / NodePort
+Steady state:
+  NodePort :30080
         │
         ▼
   Service: shop-api
-  selector: slot=blue  ◀── change this to switch traffic
+  selector: slot=blue  (permanent — never changes)
         │
    ┌────┘
    ▼
-shop-api-blue (live)        shop-api-green (idle / staging)
-image: 1.1, 3 replicas      image: 1.2, 3 replicas
+shop-api-blue (LIVE)        shop-api-green (scaled to 0)
+image: v1.1, 3 replicas     image: v1.1, 0 replicas
+```
+
+During an update green comes up temporarily, blue is updated in the background, then green is torn down:
+
+```
+Phase 1 — green comes up with new image
+  blue: v1.1, LIVE    green: v1.2, starting
+
+Phase 2 — traffic briefly moves to green while blue is updated
+  blue: v1.1, idle    green: v1.2, LIVE
+
+Phase 3 — blue updated to new image, traffic moves back
+  blue: v1.2, LIVE    green: v1.2, scaled to 0
 ```
 
 ### Initial setup
@@ -260,40 +274,42 @@ kubectl port-forward deployment/shop-api-green 9090:8080
 curl http://localhost:9090/api/products
 ```
 
-**4. Switch traffic to green (instant):**
+**4. Switch traffic to green:**
 
 ```bash
 kubectl patch service shop-api \
   -p '{"spec":{"selector":{"app":"shop-api","slot":"green"}}}'
 ```
 
-**5. Scale down blue once satisfied:**
+**5. Update blue to the new image and wait for it to be ready:**
 
 ```bash
-kubectl scale deployment/shop-api-blue --replicas=0
+# Edit deployment-blue.yaml image tag to match green, then:
+kubectl apply -f k8s/deployment-blue.yaml
+kubectl rollout status deployment/shop-api-blue
 ```
 
-> Keep blue at 0 replicas — do not delete it. This lets you scale it back up instantly for a rollback.
-
-### Rolling back
+**6. Switch traffic back to blue and tear down green:**
 
 ```bash
-# Switch traffic back to blue immediately
 kubectl patch service shop-api \
   -p '{"spec":{"selector":{"app":"shop-api","slot":"blue"}}}'
 
-# Scale blue back up if it was scaled down
-kubectl scale deployment/shop-api-blue --replicas=3
+kubectl scale deployment/shop-api-green --replicas=0
 ```
 
-### Subsequent releases
+Blue is now live on the new version. Green is idle and ready for the next release.
 
-Alternate slots each release. If green is currently live, the next release goes into blue:
+### Rolling back
 
-1. Update the image in `deployment-blue.yaml`
-2. `kubectl scale deployment/shop-api-blue --replicas=3`
-3. Wait for ready, verify, then patch the service back to `slot: blue`
-4. `kubectl scale deployment/shop-api-green --replicas=0`
+If something goes wrong before step 6, blue still has the previous image — switch back instantly:
+
+```bash
+kubectl patch service shop-api \
+  -p '{"spec":{"selector":{"app":"shop-api","slot":"blue"}}}'
+
+kubectl scale deployment/shop-api-green --replicas=0
+```
 
 The API is exposed on **NodePort 30080** — accessible at `http://<any-node-ip>:30080/api`.
 
