@@ -1,34 +1,32 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: shop-api
+  name: shop-api-green
   labels:
     app: shop-api
+    slot: green
 spec:
   replicas: 3
   selector:
     matchLabels:
       app: shop-api
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1        # at most 1 extra pod above desired count during rollout
-      maxUnavailable: 0  # never take a pod down before a new one is Ready
+      slot: green
   template:
     metadata:
       labels:
         app: shop-api
+        slot: green
     spec:
       containers:
         - name: shop-api
           image: mohamedmanja/shop-api:1.1
-          imagePullPolicy: Always   # re-pull on every pod (re)start — needed when reusing a tag
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
 
           readinessProbe:
             httpGet:
-              path: /api/products   # public endpoint — no auth required
+              path: /api/products
               port: 8080
             initialDelaySeconds: 20
             periodSeconds: 10

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop-api
+spec:
+  selector:
+    app: shop-api
+    slot: blue     # <-- change to "green" to switch traffic, "blue" to roll back
+  ports:
+    - protocol: TCP
+      port: 8080        # clusterIP port
+      targetPort: 8080  # Pod port
+      nodePort: 30080   # Host port - must be in 30000–32767
+
+  type: NodePort

@@ -204,6 +204,99 @@ The API starts on `http://localhost:8080/api`.
 mvn clean package -DskipTests
 ```
 
+## Kubernetes — Blue-Green Deployment
+
+Manifests are in the `k8s/` directory:
+
+```
+k8s/
+├── deployment-blue.yaml   # Blue slot (current live version)
+├── deployment-green.yaml  # Green slot (new version being deployed)
+└── service.yaml           # Service — toggle slot label here to switch traffic
+```
+
+### How it works
+
+Both deployments run simultaneously. The Service's `slot` selector label is the only traffic switch — changing it from `blue` to `green` (or back) is instant and zero-downtime.
+
+```
+  Ingress / NodePort
+        │
+        ▼
+  Service: shop-api
+  selector: slot=blue  ◀── change this to switch traffic
+        │
+   ┌────┘
+   ▼
+shop-api-blue (live)        shop-api-green (idle / staging)
+image: 1.1, 3 replicas      image: 1.2, 3 replicas
+```
+
+### Initial setup
+
+```bash
+kubectl apply -f k8s/deployment-blue.yaml
+kubectl apply -f k8s/service.yaml
+```
+
+### Deploying a new version
+
+**1. Update the image tag in `deployment-green.yaml` then apply it:**
+
+```bash
+kubectl apply -f k8s/deployment-green.yaml
+```
+
+**2. Wait for all green pods to be ready:**
+
+```bash
+kubectl rollout status deployment/shop-api-green
+```
+
+**3. (Optional) Smoke-test green before switching:**
+
+```bash
+kubectl port-forward deployment/shop-api-green 9090:8080
+curl http://localhost:9090/api/products
+```
+
+**4. Switch traffic to green (instant):**
+
+```bash
+kubectl patch service shop-api \
+  -p '{"spec":{"selector":{"app":"shop-api","slot":"green"}}}'
+```
+
+**5. Scale down blue once satisfied:**
+
+```bash
+kubectl scale deployment/shop-api-blue --replicas=0
+```
+
+> Keep blue at 0 replicas — do not delete it. This lets you scale it back up instantly for a rollback.
+
+### Rolling back
+
+```bash
+# Switch traffic back to blue immediately
+kubectl patch service shop-api \
+  -p '{"spec":{"selector":{"app":"shop-api","slot":"blue"}}}'
+
+# Scale blue back up if it was scaled down
+kubectl scale deployment/shop-api-blue --replicas=3
+```
+
+### Subsequent releases
+
+Alternate slots each release. If green is currently live, the next release goes into blue:
+
+1. Update the image in `deployment-blue.yaml`
+2. `kubectl scale deployment/shop-api-blue --replicas=3`
+3. Wait for ready, verify, then patch the service back to `slot: blue`
+4. `kubectl scale deployment/shop-api-green --replicas=0`
+
+The API is exposed on **NodePort 30080** — accessible at `http://<any-node-ip>:30080/api`.
+
 ## Docker
 
 ```bash

@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-api-blue
+  labels:
+    app: shop-api
+    slot: blue
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: shop-api
+      slot: blue
+  template:
+    metadata:
+      labels:
+        app: shop-api
+        slot: blue
+    spec:
+      containers:
+        - name: shop-api
+          image: mohamedmanja/shop-api:1.1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+
+          readinessProbe:
+            httpGet:
+              path: /api/products
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /api/products
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
