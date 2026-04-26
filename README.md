@@ -210,14 +210,14 @@ Manifests are in the `k8s/` directory:
 
 ```
 k8s/
-├── deployment-blue.yaml   # Blue slot (current live version)
-├── deployment-green.yaml  # Green slot (new version being deployed)
-└── service.yaml           # Service — toggle slot label here to switch traffic
+├── deployment-blue.yml   # Blue slot (current live version)
+├── deployment-green.yml  # Green slot (new version being deployed)
+└── service.yml           # Service — toggle slot label here to switch traffic
 ```
 
 ### How it works
 
-**Blue is always the live slot.** The service permanently points to `slot: blue` — you never need to edit `service.yaml`. Green is a temporary staging slot used only during an update, and is scaled down to zero in steady state.
+**Blue is always the live slot.** The service permanently points to `slot: blue` — you never need to edit `service.yml`. Green is a temporary staging slot used only during an update, and is scaled down to zero in steady state.
 
 ```
 Steady state:
@@ -249,16 +249,16 @@ Phase 3 — blue updated to new image, traffic moves back
 ### Initial setup
 
 ```bash
-kubectl apply -f k8s/deployment-blue.yaml
-kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/deployment-blue.yml
+kubectl apply -f k8s/service.yml
 ```
 
 ### Deploying a new version
 
-**1. Update the image tag in `deployment-green.yaml` then apply it:**
+**1. Update the image tag in `deployment-green.yml` then apply it:**
 
 ```bash
-kubectl apply -f k8s/deployment-green.yaml
+kubectl apply -f k8s/deployment-green.yml
 ```
 
 **2. Wait for all green pods to be ready:**
@@ -284,8 +284,8 @@ kubectl patch service shop-api \
 **5. Update blue to the new image and wait for it to be ready:**
 
 ```bash
-# Edit deployment-blue.yaml image tag to match green, then:
-kubectl apply -f k8s/deployment-blue.yaml
+# Edit deployment-blue.yml image tag to match green, then:
+kubectl apply -f k8s/deployment-blue.yml
 kubectl rollout status deployment/shop-api-blue
 ```
 
